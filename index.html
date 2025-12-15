@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+   <meta charset="UTF-8">
+   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+   <title>Roblox Update Radar</title>
+   <link rel="stylesheet" href="style.css">
+   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+</head>
+
+<body>
+
+   <div class="topbar">
+      <div class="urlbar">
+         <input id="gameInput" type="text" placeholder="URL..." autocomplete="off">
+         <button id="addBtn" class="pill" type="button">Add Game</button>
+      </div>
+
+      <div class="tools">
+         <input id="categoryInput" placeholder="New category..." autocomplete="off">
+         <button id="addCategoryBtn" class="pill ghost">Add Category</button>
+
+         <button id="exportCsvBtn" class="pill ghost">Export CSV</button>
+
+         <label class="pill ghost file">
+            Import CSV
+            <input id="importCsvInput" type="file" accept=".csv,text/csv">
+         </label>
+      </div>
+   </div>
+
+   <main class="page">
+      <div id="categoriesContainer" class="categories"></div>
+   </main>
+
+   <div id="toast" class="toast">Saved</div>
+
+   <script type="module" src="./js/app.js"></script>
+</body>
+
+</html>
