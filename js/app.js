@@ -4,7 +4,7 @@ import { exportCsv, downloadText, importCsvFile } from "./csv.js";
 import { toast, formatUpdated, sortGamesByLatest, findGame, escapeHtml } from "./ui.js";
 import { wireDragAndDrop } from "./dnd.js";
 
-let state = loadState(); // { categories: [...] }
+let state = loadState();
 ensureDefault();
 
 wireDragAndDrop({
@@ -16,6 +16,12 @@ wireDragAndDrop({
 window.addEventListener("load", () => {
    render();
    bindUI();
+
+   // 1. ASK FOR PERMISSION ON LOAD
+   if (Notification.permission !== "granted" && Notification.permission !== "denied") {
+      Notification.requestPermission();
+   }
+
    setInterval(checkUpdates, 60000);
 });
 
@@ -37,7 +43,7 @@ function bindUI() {
 
    exportBtn.onclick = () => {
       const csv = exportCsv(state.categories);
-      downloadText(`roblox-update-radar-backup-${new Date().toISOString().slice(0, 10)}.csv`, csv);
+      downloadText(`roblox-radar-${new Date().toISOString().slice(0, 10)}.csv`, csv);
       toast("CSV exported");
    };
 
@@ -67,16 +73,13 @@ function ensureDefault() {
    persist();
 }
 
-function persist() {
-   saveState(state);
-}
+function persist() { saveState(state); }
 
 async function addGame() {
    const input = document.getElementById("gameInput");
    const url = input.value.trim();
    if (!url) return;
 
-   // prevent duplicates across all categories
    const match = url.match(/roblox\.com\/games\/(\d+)/i);
    if (!match) return alert("Invalid Roblox URL");
    const placeId = match[1];
@@ -88,11 +91,9 @@ async function addGame() {
 
    try {
       const game = await fetchGameByPlaceUrl(url);
-      // by default, add into Default
       const def = state.categories.find(c => c.name === "Default") || state.categories[0];
       def.games.push(game);
       sortGamesByLatest(def);
-
       persist();
       render();
       input.value = "";
@@ -109,7 +110,6 @@ function addCategory() {
    const input = document.getElementById("categoryInput");
    const name = input.value.trim();
    if (!name) return;
-
    state.categories.push({ id: crypto.randomUUID(), name, games: [] });
    persist();
    render();
@@ -125,54 +125,45 @@ function renameCategory(catId) {
    cat.name = next.trim() || cat.name;
    persist();
    render();
-   toast("Renamed");
 }
 
 function deleteCategory(catId) {
    const cat = state.categories.find(c => c.id === catId);
    if (!cat) return;
-
    if (!confirm(`Delete "${cat.name}"? Games will move to Default.`)) return;
-
    const def = state.categories.find(c => c.name === "Default") || state.categories[0];
    if (def.id !== catId) def.games.push(...cat.games);
-
    state.categories = state.categories.filter(c => c.id !== catId);
    ensureDefault();
    persist();
    render();
-   toast("Deleted");
 }
 
 function removeGame(catId, placeId) {
    const cat = state.categories.find(c => c.id === catId);
    if (!cat) return;
-   if (!confirm("Remove this game?")) return;
-
+   if (!confirm("Stop tracking this game?")) return;
    cat.games = cat.games.filter(g => g.placeId !== placeId);
    persist();
    render();
-   toast("Removed");
+   toast("Game removed");
 }
 
 function moveGameBetweenCategories(placeId, fromCatId, toCatId) {
    const from = state.categories.find(c => c.id === fromCatId);
    const to = state.categories.find(c => c.id === toCatId);
    if (!from || !to) return;
-
    const idx = from.games.findIndex(g => g.placeId === placeId);
    if (idx === -1) return;
-
    const [game] = from.games.splice(idx, 1);
    to.games.push(game);
-
    sortGamesByLatest(from);
    sortGamesByLatest(to);
-
    persist();
    render();
 }
 
+// --- CORE UPDATE LOGIC ---
 async function checkUpdates() {
    const all = state.categories.flatMap(c => c.games);
    if (!all.length) return;
@@ -181,7 +172,7 @@ async function checkUpdates() {
 
    try {
       const fresh = await fetchUpdates(ids);
-      let changed = false;
+      let updatesFound = false;
 
       for (const fg of fresh) {
          for (const cat of state.categories) {
@@ -191,16 +182,24 @@ async function checkUpdates() {
             if (g.lastUpdated !== fg.updated) {
                g.lastUpdated = fg.updated;
                g.name = fg.name;
-               changed = true;
+               updatesFound = true;
+
+               // 2. SEND BROWSER NOTIFICATION
+               if (Notification.permission === "granted") {
+                  new Notification(`Update: ${fg.name}`, {
+                     body: "A new update has been detected!",
+                     icon: g.thumbnail
+                  });
+               }
             }
          }
       }
 
-      if (changed) {
+      if (updatesFound) {
          for (const cat of state.categories) sortGamesByLatest(cat);
          persist();
          render();
-         toast("Updates found");
+         toast("Updates found!");
       }
    } catch (e) {
       console.log("Polling error:", e);
@@ -212,8 +211,6 @@ function render() {
    root.innerHTML = "";
 
    for (const cat of state.categories) {
-      sortGamesByLatest(cat);
-
       const section = document.createElement("section");
       section.className = "category";
 
@@ -232,7 +229,7 @@ function render() {
             <article class="game-card" draggable="true" data-place-id="${g.placeId}" data-cat-id="${cat.id}">
               <button class="xbtn" title="Remove" data-action="remove" data-cat="${cat.id}" data-place="${g.placeId}">×</button>
               <div class="card-image">
-                <img src="${g.thumbnail || ""}" alt="">
+                <img src="${g.thumbnail || ""}" alt="${escapeHtml(g.name)}" loading="lazy">
               </div>
               <div class="card-body">
                 <div class="card-title" title="${escapeHtml(g.name)}">${escapeHtml(g.name)}</div>
@@ -244,18 +241,14 @@ function render() {
         </div>
       </div>
     `;
-
       root.appendChild(section);
    }
 
-   // delegate clicks
    root.onclick = (e) => {
       const btn = e.target.closest?.("[data-action]");
       if (!btn) return;
-
       const action = btn.dataset.action;
       const catId = btn.dataset.cat;
-
       if (action === "rename") return renameCategory(catId);
       if (action === "delete") return deleteCategory(catId);
       if (action === "remove") return removeGame(catId, btn.dataset.place);
